@@ -34,8 +34,8 @@ def scale_qtys(x, n):
 
 
 if __name__ == '__main__':
-    print('\n--- SAMPLE MARKET MAKER V2 ---')
-    print('For pybit, created by verata_veritatis.')
+    print('\n--- MARKET MAKER ---')
+    print('For ByBit.')
 
     if not config.API_KEY or not config.PRIVATE_KEY:
         raise PermissionError('An API key is required to run this program.')
@@ -44,7 +44,8 @@ if __name__ == '__main__':
     time.sleep(1)
 
     _print('Opening session')
-    s = HTTP(
+    session = HTTP(
+        testnet = True,
         api_key=config.API_KEY,
         api_secret=config.PRIVATE_KEY,
         logging_level=50,
@@ -56,7 +57,7 @@ if __name__ == '__main__':
 
     # Auth sanity test.
     try:
-        s.get_wallet_balance()
+        session.get_wallet_balance()
     except InvalidRequestError as e:
         raise PermissionError('API key is invalid.')
     else:
@@ -64,7 +65,7 @@ if __name__ == '__main__':
 
     # Set leverage to cross.
     try:
-        s.set_leverage(
+        session.set_leverage(
             symbol=config.SYMBOL,
             leverage=0
         )
@@ -80,18 +81,18 @@ if __name__ == '__main__':
     while True:
 
         # Cancel orders.
-        s.cancel_all_active_orders(
+        session.cancel_all_active_orders(
             symbol=config.SYMBOL
         )
 
         # Close position if open.
-        s.close_position(
+        session.close_position(
             symbol=config.SYMBOL
         )
 
         # Grab the last price.
         _print('Checking last price')
-        last = float(s.latest_information_for_symbol(
+        last = float(session.latest_information_for_symbol(
             symbol=config.SYMBOL
         )['result'][0]['last_price'])
         price_range = config.RANGE * last
@@ -105,7 +106,7 @@ if __name__ == '__main__':
 
         # Scale quantity additively (1x, 2x, 3x, 4x).
         _print('Generating order quantities')
-        balance_in_usd = float(s.get_wallet_balance(
+        balance_in_usd = float(session.get_wallet_balance(
             coin=config.COIN
         )['result'][config.COIN]['available_balance']) * last
         available_equity = balance_in_usd * config.EQUITY
@@ -123,7 +124,7 @@ if __name__ == '__main__':
             } for k in range(len(qtys))
         ]
         _print('Submitting orders')
-        responses = s.place_active_order_bulk(orders=orders)
+        responses = session.place_active_order_bulk(orders=orders)
 
         # Let's create an ID list of buys and sells as a dict.
         _print('Orders submitted successfully')
@@ -139,21 +140,21 @@ if __name__ == '__main__':
 
             # Await position.
             _print('Awaiting position')
-            while not abs(s.my_position(
+            while not abs(session.my_position(
                     symbol=config.SYMBOL
             )['result']['size']):
                 time.sleep(1 / config.POLLING_RATE)
 
             # When we have a position, get the size and cancel all the
             # opposing orders.
-            if s.my_position(
+            if session.my_position(
                     symbol=config.SYMBOL
             )['result']['side'] == 'Buy':
                 to_cancel = [{
                     'symbol': config.SYMBOL,
                     'order_id': i
                 } for i in order_ids['Sell']]
-            elif s.my_position(
+            elif session.my_position(
                     symbol=config.SYMBOL
             )['result']['side'] == 'Sell':
                 to_cancel = [{
@@ -164,14 +165,14 @@ if __name__ == '__main__':
                 # Position was closed immediately for some reason. Restart.
                 _print('Position closed unexpectedly—resetting')
                 break
-            s.cancel_active_order_bulk(
+            session.cancel_active_order_bulk(
                 orders=to_cancel
             )
 
             # Set a TP.
-            p = s.my_position(symbol=config.SYMBOL)['result']
+            p = session.my_position(symbol=config.SYMBOL)['result']
             e = float(p['entry_price'])
-            tp_response = s.place_active_order(
+            tp_response = session.place_active_order(
                 symbol=config.SYMBOL,
                 side='Sell' if p['side'] == 'Buy' else 'Buy',
                 order_type='Limit',
@@ -189,7 +190,7 @@ if __name__ == '__main__':
                     stop_price = e - (e * config.STOP_DIST)
                 else:
                     stop_price = e + (e * config.STOP_DIST)
-                s.set_trading_stop(
+                session.set_trading_stop(
                     symbol=config.SYMBOL,
                     stop_loss=int(stop_price)
                 )
@@ -213,13 +214,13 @@ if __name__ == '__main__':
 
                 # Sleep and re-fetch.
                 time.sleep(1 / config.POLLING_RATE)
-                p = s.my_position(symbol=config.SYMBOL)['result']
+                p = session.my_position(symbol=config.SYMBOL)['result']
 
                 # If size has changed, update TP based on entry and size.
                 if p['size'] > curr_size:
                     e = float(p['entry_price'])
                     tp_price = e + tp_dp if p['side'] == 'Buy' else e - tp_dp
-                    s.replace_active_order(
+                    session.replace_active_order(
                         symbol=config.SYMBOL,
                         order_id=tp_response['result']['order_id'],
                         p_r_price=int(tp_price),
@@ -229,7 +230,7 @@ if __name__ == '__main__':
 
             # Position has closed—get PNL information.
             print(' ' * 120, end='\r')
-            pnl_r = s.closed_profit_and_loss(
+            pnl_r = session.closed_profit_and_loss(
                 symbol=config.SYMBOL
             )['result']['data'][0]
 
